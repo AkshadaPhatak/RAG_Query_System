@@ -1,0 +1,305 @@
+<!--<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Policy QA System</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold text-center mb-8">RAG based System for Policy Query Resolution</h1>
+        
+        File Upload Section
+        <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h2 class="text-xl font-semibold mb-4">Upload New Policy</h2>
+            <form id="uploadForm" class="space-y-4">
+                <div class="flex items-center space-x-4">
+                    <input type="file" 
+                           id="policyFile" 
+                           accept=".pdf"
+                           class="flex-1 p-2 border rounded">
+                    <button type="submit"
+                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                        Upload
+                    </button>
+                </div>
+                <div id="uploadStatus" class="text-sm"></div>
+            </form>
+        </div> 
+
+        Query Section
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <h2 class="text-xl font-semibold mb-4">Ask a Question</h2>
+            <form id="queryForm" class="space-y-4">
+                <textarea id="query" name="query"
+                          placeholder="Enter your question here..."
+                          class="w-full p-3 border rounded-lg resize-none h-32"></textarea>
+                <button type="submit"
+                        class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600">
+                    Submit
+                </button>
+            </form>
+
+            Response Section
+            <div id="responseSection" class="mt-8 hidden">
+                <div class="mb-6">
+                    <h3 class="font-semibold text-gray-700 mb-2">Original Question:</h3>
+                    <div id="originalQuery" class="p-4 bg-gray-50 rounded-lg"></div>
+                </div>
+                
+                <div class="mb-6">
+                    <h3 class="font-semibold text-gray-700 mb-2">Rewritten Query:</h3>
+                    <div id="rewrittenQuery" class="p-4 bg-gray-50 rounded-lg text-gray-600 italic"></div>
+                </div>
+
+                <div class="mb-6">
+                    <h3 class="font-semibold text-gray-700 mb-2">Answer:</h3>
+                    <div id="answer" class="p-4 bg-gray-50 rounded-lg"></div>
+                </div>
+
+                <div class="mb-6">
+                    <h3 class="font-semibold text-gray-700 mb-2">Justification:</h3>
+                    <div id="justification" class="p-4 bg-gray-50 rounded-lg"></div>
+                </div>
+
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">Sources:</h3>
+                    <div id="sources" class="space-y-4"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Function to format text with markdown-style formatting
+        function formatText(text) {
+            if (!text) return '';
+            
+            // First split the text into main content and numbered points
+            let parts = text.split(/(?=\d+\.\s)/);
+            
+            // Format the initial text (if any)
+            let formattedText = parts[0];
+            
+            // If there are numbered points, format them as a list
+            if (parts.length > 1) {
+                formattedText += '<ul class="list-none space-y-2 mt-2">';
+                for (let i = 1; i < parts.length; i++) {
+                    formattedText += `<li class="pl-4">${parts[i]}</li>`;
+                }
+                formattedText += '</ul>';
+            }
+
+            // Handle bold text (**text**)
+            formattedText = formattedText.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold">$1</strong>');
+            
+            // Handle line breaks
+            formattedText = formattedText.replace(/\n/g, '<br>');
+            
+            return formattedText;
+        }
+
+        // File Upload Handler (only attach if the upload form exists)
+        const uploadForm = document.getElementById('uploadForm');
+        if (uploadForm) {
+            uploadForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const fileInput = document.getElementById('policyFile');
+                const statusDiv = document.getElementById('uploadStatus');
+                
+                if (!fileInput.files[0]) {
+                    statusDiv.textContent = 'Please select a file first.';
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+
+                try {
+                    statusDiv.textContent = 'Uploading...';
+                    const response = await fetch('/upload-policy', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    statusDiv.textContent = data.message || data.error;
+                } catch (error) {
+                    statusDiv.textContent = 'Upload failed: ' + error.message;
+                }
+            });
+        }
+
+        // Query Handler
+        document.getElementById('queryForm').addEventListener('submit', async (e) => {
+            e.preventDefault(); // Prevent the form from submitting normally
+            const queryInput = document.getElementById('query');
+            const responseSection = document.getElementById('responseSection');
+            const answer = document.getElementById('answer');
+            
+            if (!queryInput.value.trim()) {
+                alert('Please enter a question.');
+                return;
+            }
+
+            try {
+                // Show loading state and clear previous outputs
+                responseSection.classList.remove('hidden');
+                
+                // Clear all previous content
+                document.getElementById('originalQuery').textContent = '';
+                document.getElementById('rewrittenQuery').textContent = '';
+                document.getElementById('answer').innerHTML = '<div class="animate-pulse">Processing your question...</div>';
+                document.getElementById('justification').textContent = '';
+                document.getElementById('sources').innerHTML = '';
+
+                const formData = new FormData();
+                formData.append('query', queryInput.value);
+
+                // Set headers to indicate we want JSON response
+                const headers = new Headers();
+                headers.append('Accept', 'application/json');
+
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: headers,
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Function to format text with markdown-style formatting
+                function formatText(text) {
+                    // First split the text into main content and numbered points
+                    let parts = text.split(/(?=\d+\.\s)/);
+                    
+                    // Format the initial text (if any)
+                    let formattedText = parts[0];
+                    
+                    // If there are numbered points, format them as a list
+                    if (parts.length > 1) {
+                        formattedText += '<ul class="list-none space-y-2 mt-2">';
+                        for (let i = 1; i < parts.length; i++) {
+                            formattedText += `<li class="pl-4">${parts[i]}</li>`;
+                        }
+                        formattedText += '</ul>';
+                    }
+
+                    // Handle bold text (**text**)
+                    formattedText = formattedText.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold">$1</strong>');
+                    
+                    // Handle line breaks
+                    formattedText = formattedText.replace(/\n/g, '<br>');
+                    
+                    return formattedText;
+                }
+
+                // Update all sections with the response
+                document.getElementById('originalQuery').textContent = data.original_query;
+                document.getElementById('rewrittenQuery').textContent = data.rewritten_query;
+                document.getElementById('answer').innerHTML = formatText(data.answer);
+                document.getElementById('justification').innerHTML = formatText(data.justification);
+
+                // Update sources
+                const sourcesDiv = document.getElementById('sources');
+                sourcesDiv.innerHTML = ''; // Clear previous sources
+                data.sources.forEach((source, index) => {
+                    const sourceEl = document.createElement('div');
+                    sourceEl.className = 'p-4 bg-gray-50 rounded-lg border border-gray-200';
+                    sourceEl.innerHTML = `
+                        <p class="font-medium text-gray-700">Source ${index + 1}: ${source.document}</p>
+                        <p class="text-gray-600 mt-1">Section: ${source.section}</p>
+                        <p class="mt-2 text-gray-800">${source.text}</p>
+                    `;
+                    sourcesDiv.appendChild(sourceEl);
+                });
+
+            } catch (error) {
+                responseSection.classList.remove('hidden');
+                document.getElementById('answer').innerHTML = `
+                    <div class="text-red-500">
+                        Error: ${error.message}
+                    </div>
+                `;
+            }
+        });
+    </script>
+</body>
+</html>-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Policy QA System</title>
+    <!-- Links to your external CSS file -->
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+    <style>
+        /* Placeholder styling for consistency if style.css hasn't loaded */
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        .query-section { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RAG-based System for Policy Query Resolution</h1>
+        
+        <!-- Query Section using a class for styling -->
+        <div class="query-section">
+            <h2>Ask a Question</h2>
+            
+            <!-- Message Box for JS status messages -->
+            <!--<div id="messageBox" class="error hidden" role="alert"></div>-->
+
+            <form id="queryForm" action="/query" method="POST">
+                <textarea id="query" name="query"
+                          placeholder="Enter your policy question here..."
+                          rows="5"
+                          style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 15px;"
+                          required></textarea>
+                <div class="actions" style="text-align: right;">
+                    <button type="submit"
+                            id="submitButton"
+                            class="button">
+                        Submit Query
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Use a function to show temporary messages instead of alert()
+        function showMessage(message, type = 'error') {
+            const msgBox = document.getElementById('messageBox');
+            msgBox.textContent = message;
+            msgBox.className = type === 'error' ? 'error' : 'success';
+            msgBox.classList.remove('hidden');
+            
+            setTimeout(() => {
+                msgBox.classList.add('hidden');
+            }, 5000);
+        }
+
+        // Handles visual loading state before form submission (POST)
+        document.getElementById('queryForm').addEventListener('submit', function(e) {
+            const queryInput = document.getElementById('query');
+            const submitButton = document.getElementById('submitButton');
+            
+            if (!queryInput.value.trim()) {
+                e.preventDefault(); 
+                showMessage('Please enter a question before submitting.', 'error');
+                return;
+            }
+
+            // Start Loading State (disables button and adds loading style)
+            submitButton.disabled = true;
+            submitButton.textContent = 'Processing...';
+            document.body.classList.add('loading'); // Use the loading CSS class
+        });
+    </script>
+</body>
+</html>
